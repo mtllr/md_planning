@@ -14,7 +14,7 @@ md-planning
         :alt: Documentation Status
 
 
-package to define, visualize and budget projects using yaml syntax.
+package to define, visualize with gantt and budget projects using yaml syntax.
 
 The tasks in the projects can contain *uncertainties* in which case the pert beta estimate is used to define the expected duration of the task.
 

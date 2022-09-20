@@ -30,7 +30,7 @@ test_requirements = [
 
 setup(
     author="Martin Teller",
-    author_email="martin@l1nx.it",
+    author_email="martintellerpro@gmail.com",
     python_requires=">=3.7",
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
@@ -43,8 +43,8 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
     ],
-    description="package to help make yaml based projects with "
-    "markdown-preview-enhanced and vscode",
+    description="package to define, visualize with gantt and budget "
+    "projects using yaml syntax. ",
     entry_points={
         "console_scripts": [
             "md_planning=md_planning.cli:main",
@@ -54,7 +54,7 @@ setup(
     license="MIT license",
     long_description=readme + "\n\n" + history,
     include_package_data=True,
-    keywords="md_planning",
+    keywords="md_planning project gantt PERT CPM budgeting budget visualization",
     name="md_planning",
     packages=find_packages(include=["md_planning", "md_planning.*"]),
     test_suite="tests",
@@ -62,4 +62,9 @@ setup(
     url="https://github.com/mtllr/md_planning",
     version="0.1.0",
     zip_safe=False,
+    project_urls={
+        "Homepage": "https://github.com/mtllr/md_planning",
+        "Documentation": "https://md-planning.readthedocs.io",
+        "Buy me a coffee": "https://www.buymeacoffee.com/mtllr",
+    },
 )
