@@ -1,0 +1,17 @@
+language: python
+python:
+- 3.8
+- 3.7
+- 3.6
+install: pip install -U tox-travis
+script: tox
+deploy:
+  provider: pypi
+  distributions: sdist bdist_wheel
+  user: mtllr
+  password:
+    secure: XooHq30a/u+MV9pRxhi1QNopVOJaYMXdrL0TZ86IXDbOuNpSxhJUxZw9r5V5UmCUAGwqdrL3pF40UnUwixY9yuXH07vhKGSiqe7DRiYE/KXIGvI10es0K7vsM8OhA/O9leWlqCQZpdMg2euvhOm+fXzD48yKOdwVrgyrs7asH8BQxsg/ZxbcRbU+fsJ0x0tZaeIpAwCjicwR+6k17C1aEf2luSkvGTiVU3+R/EmGDgxFN5HudUOvtuD/L7i3Y6BiurlGOcl8JQj3tZjryHhlW5sFWXKUVYcSJGzNQFmE536SoYbrGac1vzX5LUmVdST5tAENii+zhhyFqkNPNr7lBeRNWv5/lC1rCgaDxFJPTyCEt0iyVVPDHSNOvr7S6MhnGCtKLRqM+Vrw2k9A4cTbN3AmuKoChoijOaORJqlkJx7mC93K1P5QzOZ8dK6xrPDr9qi7boduyQF5ulXLb2k8btx0em21OIWt/Jp3wh2PNE1o1OmTgSJYZc08d9CYPZcvqGFJLNLjtuecLigHzsxCNNcSIYCYhZVmVqgGISz9BBAkxQY1Y4awiwsSuy8R1w42rMRw2V/s0QhCyoUWOmciVk3FYEIZ59T54F3I0KLaJKJ7WqNicfrmrYb7A3CJuoQYcq08gUbqJRM73JIpxaFmTjv7vI8EFrGnDJZDgwRIcLg=
+  on:
+    tags: true
+    repo: mtllr/md_planning
+    python: 3.8
