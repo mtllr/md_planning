@@ -2,6 +2,6 @@
 
 __author__ = """Martin Teller"""
 __email__ = 'martintellerpro@gmail.com'
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 
 from .md_planning import ProjectReader, PertDrawer, GanttDrawer
