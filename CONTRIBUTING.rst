@@ -35,6 +35,21 @@ Implement Features
 Look through the GitHub issues for features. Anything tagged with "enhancement"
 and "help wanted" is open to whoever wants to implement it.
 
+Here are some example features, bugs, etc:
+
+**version 0.4.0**
+
+* TODO: (feature) critical_color implementation
+* TODO: (bugfix) E17FB6 v0.2 error message shows what csv task and what is the offensive entry
+* BUG: if there is not at least one dependency between tasks then python-gantt does NOT create the svg
+* TODO: (feature) assert that task names in a multiproject definition are unique for the whole definition file
+* TODO: (refactor) data structure and project classes so the Resource class has methods: get_price, get_unit
+* TODO: (refactor) data structure and project classes so the Task class has method: get_usage
+* TODO: (refactor) data structure and project classes so the Project class has methods: get_unit, get_price, get_usage, get_cost
+* TODO: (feature) when user makes task depend on milestone, KeyError is raised but it is difficult to find in which task the error was made
+* TODO: (bug) nested definition implementation supposes that the CP of a project is the `SUM` of CPs of all it's milestones. This is not true if a "small" task in a milestone depends on a long running task outside of the current milestone. The only way to solve this now is to build the full CP between milestones.
+* TODO: (refactor) add get_dependencies and get_resources to the main code
+
 Write Documentation
 ~~~~~~~~~~~~~~~~~~~
 

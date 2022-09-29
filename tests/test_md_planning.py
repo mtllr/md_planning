@@ -8,6 +8,7 @@ import pytest
 import datetime
 import re
 import pandas as pd
+import yaml
 
 from click.testing import CliRunner
 
@@ -17,25 +18,25 @@ from md_planning.md_planning import (
     ProjectReader,
     rename,
     get_task_type,
+    is_nested,
+    walk_project,
 )
 
 from gantt import Resource, Task
 
 from md_planning import cli
 
-# TODO: (feature) nested milestones and tasks
-# TODO: (feature) critical_color implementation
-# TODO: (feature) get_critical_path implementation in GanttDrawer (consider refactoring PertDrawer out?)
-# TODO: (bugfix) E17FB6 v0.2 error message shows what csv task and what is the offensive entry
-# TODO: (refactor) consider remove get_task_type registration for List type
 
+# TODO: (feature) critical_color implementation
+# TODO: (bugfix) E17FB6 v0.2 error message shows what csv task and what is the offensive entry
 # BUG: if there is not at least one dependency between tasks then python-gantt does NOT create the svg
 # TODO: (feature) assert that task names in a multiproject definition are unique for the whole definition file
 # TODO: (refactor) data structure and project classes so the Resource class has methods: get_price, get_unit
 # TODO: (refactor) data structure and project classes so the Task class has method: get_usage
 # TODO: (refactor) data structure and project classes so the Project class has methods: get_unit, get_price, get_usage, get_cost
 # TODO: (feature) when user makes task depend on milestone, KeyError is raised but it is difficult to find in which task the error was made
-# TODO: (feature) when task depends on milestone, replace milestone dependency with the last critical task in this milestone but do not make this task critical globally in the project
+# TODO: (bug) nested definition implementation supposes that the CP of a project is the `SUM` of CPs of all it's milestones. This is not true if a "small" task in a milestone depends on a long running task outside of the current milestone. The only way to solve this now is to build the full CP between milestones.
+# TODO: (refactor) add get_dependencies and get_resources to the main code
 
 @pytest.fixture
 def flat_project():
@@ -84,12 +85,13 @@ Projects:
 """
     return project_str
 
+
 @pytest.fixture
 def nested_project():
     project_str = """
-Font:
-    fill: black
-    font_family: Verdana
+# Font:
+#     fill: black
+#     font_family: Verdana
 Vacations:
     - 2022-09-30
     - 2022-11-01
@@ -98,54 +100,63 @@ Resources:
     Martin:
         price:
             value: 68.75
-            unit: hour
+            unit: workhour
         vacations:
             - 2022-09-15
     Samuel:
         price:
             value: 600
-            unit:  day
+            unit:  workday
 Projects:
     -   Name: Test1
         Tasks:
             kickoff:
                 brief:
+                    type: task
                     start: 2022-09-05
                     duration: 0.125 # 1 hour
                     percent_done: 0
                     resources: null
                     depends_on: null
             goals:
+                type: task
                 start: 2022-09-05
                 duration: 0.25
                 percent_done: 0
                 resources: Martin
-            Env setup: [task, 2022-09-06, 1, 0, "Martin", "kickoff"]
+                depends_on: brief
+            Env setup: [2022-09-06, 1, 0, "Martin", "goals"]
 """
     return project_str
+
 
 ################################################################################
 # UTILITY FUNCTIONS
 ################################################################################
+
 
 def test_rename_strict():
     with pytest.raises(KeyError):
         _ = dict()
         rename(_, "a", "b")
 
+
 def test_rename_flex_exists():
     _ = dict(a=1)
     res = rename(_, "a", "b", True)
     assert res == {"b": 1}
+
 
 def test_rename_flex_not_exists():
     _ = dict()
     res = rename(_, "a", "b", True, 1)
     assert res == {"b": 1}
 
+
 def test_get_task_type_flat_milestone():
     milestone = dict(type="milestone", depends_on=[])
     assert get_task_type(milestone) == "milestone"
+
 
 def test_get_task_type_flat_task_dict():
     task = {
@@ -159,25 +170,58 @@ def test_get_task_type_flat_task_dict():
     }
     assert get_task_type(task) == "task"
 
+
 def test_get_task_type_flat_task_list():
     task = ["2022-09-06", 1, 0, "Martin", "kickoff", None]
     assert get_task_type(task) == "task"
 
-@pytest.mark.skip("Not Implemented")
+
 def test_get_task_type_nested_milestone():
-    pass
+    milestone = dict(type="milestone", depends_on=[])
+    assert get_task_type(milestone) == "milestone"
 
-@pytest.mark.skip("Not Implemented")
+
 def test_get_task_type_nested_task_dict():
-    pass
+    task = {
+        "start": "",
+        "duration": 1,
+        "percent_done": 0,
+        "resources": [],
+        "depends_on": [],
+        "color": None,
+    }
+    assert get_task_type(task) == "task"
 
-@pytest.mark.skip("Not Implemented")
+
 def test_get_task_type_nested_task_list():
-    pass
+    task = ["2022-09-06", 1, 0, "Martin", "kickoff", None]
+    assert get_task_type(task) == "task"
+
+
+def test_is_nested_flat_is_false(flat_project):
+    proj = yaml.full_load(flat_project)
+    assert is_nested(proj["Projects"][0]["Tasks"]) == False
+
+
+def test_is_nested_nested_is_true(nested_project):
+    proj = yaml.full_load(nested_project)
+    assert is_nested(proj["Projects"][0]["Tasks"]) == True
+
+
+def test_walk_project_returns_all_tasks(nested_project):
+    proj = yaml.full_load(nested_project)
+    walked = walk_project(proj["Projects"][0]["Tasks"])
+    assert isinstance(walked, list)
+    assert (
+        all([key in ["kickoff", "brief", "goals", "Env setup"] for (key, _) in walked])
+        and len(walked) > 0
+    )
+
 
 ################################################################################
 # PROJECTREADER
 ################################################################################
+
 
 def test_project_reader_build_flat_project_is_conformant(flat_project):
     p = ProjectReader(flat_project)
@@ -377,7 +421,7 @@ def test_project_reader_build_flat_project_is_conformant(flat_project):
         },
     }
 
-@pytest.mark.skip("Not Implemented")
+
 def test_project_reader_build_nested_project_is_conformant(nested_project):
     p = ProjectReader(nested_project)
     projects, pertcharts = p.build_project()
@@ -385,44 +429,36 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
     assert len(pertcharts) == 1
     assert len(projects["projects"]) == 1
     assert pertcharts == {
-        "Test1": [
-            {
-                "name": "brief",
-                "duration": 0.125,
-                "lag": 0,
-                "depends_on": None,
+        "Test1": {
+            "brief": {
                 "Tid": "brief",
                 "start": 0,
+                "duration": 0.125,
                 "end": 0,
                 "responsible": "CRITICAL",
-                "pred": [],
+                "pred": ["START"],
             },
-            {
-                "name": "goals",
-                "duration": 0.25,
-                "lag": 0,
-                "depends_on": None,
+            "goals": {
                 "Tid": "goals",
                 "start": 0,
+                "duration": 0.25,
                 "end": 0,
                 "responsible": "CRITICAL",
                 "pred": ["brief"],
             },
-            {
-                "name": "Env setup",
-                "duration": 1,
-                "lag": 0,
-                "depends_on": None,
+            "Env setup": {
                 "Tid": "Env setup",
                 "start": 0,
+                "duration": 1,
                 "end": 0,
                 "responsible": "CRITICAL",
                 "pred": ["goals"],
             },
-        ]
+        }
     }
     assert projects == {
-        "font": {"fill": "black", "font_family": "Verdana"},
+        # "font": {"fill": "black", "font_family": "Verdana"},
+        "font": {},
         "vacations": [
             datetime.date(2022, 9, 30),
             datetime.date(2022, 11, 1),
@@ -430,10 +466,10 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
         ],
         "resources": {
             "Martin": {
-                "price": {"value": 68.75, "unit": "hour"},
+                "price": {"value": 68.75, "unit": "workhour"},
                 "vacations": [datetime.date(2022, 9, 15)],
             },
-            "Samuel": {"price": {"value": 600, "unit": "day"}},
+            "Samuel": {"price": {"value": 600, "unit": "workday"}},
         },
         "projects": {"Test1": None},
         "tasks": {
@@ -455,17 +491,12 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                 "milestone": {
                     "name": "kickoff",
                     "start": None,
-                    "depends_of": "brief",
+                    "depends_of": ["brief"],
                     "color": None,
                     "fullname": None,
                     "display": True,
                 },
-                "pertchart": {
-                    "name": "kickoff",
-                    "duration": None,
-                    "lag": 0,
-                    "depends_on": None,
-                },
+                "pertchart": {},
                 "cpm": {
                     "name": "kickoff",
                     "duration": None,
@@ -498,15 +529,12 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "display": True,
                 },
                 "pertchart": {
-                    "name": "brief",
-                    "duration": 0.125,
-                    "lag": 0,
-                    "depends_on": None,
                     "Tid": "brief",
                     "start": 0,
+                    "duration": 0.125,
                     "end": 0,
                     "responsible": "CRITICAL",
-                    "pred": [],
+                    "pred": ["START"],
                 },
                 "cpm": {"name": "brief", "duration": 0.125, "lag": 0, "depends_of": []},
                 "is_milestone": False,
@@ -519,7 +547,7 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "stop": None,
                     "duration": 0.25,
                     "depends_of": ["brief"],
-                    "resources": ["Martin"],
+                    "resources": ["1 Martin"],
                     "percent_done": 0,
                     "color": None,
                     "fullname": None,
@@ -535,12 +563,9 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "display": True,
                 },
                 "pertchart": {
-                    "name": "goals",
-                    "duration": 0.25,
-                    "lag": 0,
-                    "depends_on": None,
                     "Tid": "goals",
                     "start": 0,
+                    "duration": 0.25,
                     "end": 0,
                     "responsible": "CRITICAL",
                     "pred": ["brief"],
@@ -561,7 +586,7 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "stop": None,
                     "duration": 1,
                     "depends_of": ["goals"],
-                    "resources": ["Martin"],
+                    "resources": ["1 Martin"],
                     "percent_done": 0,
                     "color": None,
                     "fullname": None,
@@ -577,12 +602,9 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "display": True,
                 },
                 "pertchart": {
-                    "name": "Env setup",
-                    "duration": 1,
-                    "lag": 0,
-                    "depends_on": None,
                     "Tid": "Env setup",
                     "start": 0,
+                    "duration": 1,
                     "end": 0,
                     "responsible": "CRITICAL",
                     "pred": ["goals"],
@@ -598,9 +620,11 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
         },
     }
 
+
 ################################################################################
 # PERTDRAWER
 ################################################################################
+
 
 def test_pertdrawer_draw_creates_chart_file(flat_project):
     project_def = ProjectReader(flat_project)
@@ -611,9 +635,11 @@ def test_pertdrawer_draw_creates_chart_file(flat_project):
     os.unlink("Test1_pert.pdf")
     os.unlink("Test1_pert.gv")
 
+
 ################################################################################
 # GANTTDRAWER
 ################################################################################
+
 
 def test_gantt_drawer_creates_gantt_svg_output(flat_project):
     project_def = ProjectReader(flat_project)
@@ -623,6 +649,7 @@ def test_gantt_drawer_creates_gantt_svg_output(flat_project):
     assert pathlib.Path("Test1.svg").is_file()
     os.unlink("Test1.svg")
 
+
 def test_gantt_drawer_creates_resource_svg_output(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -631,9 +658,11 @@ def test_gantt_drawer_creates_resource_svg_output(flat_project):
     assert pathlib.Path("Test1_resources.svg").is_file()
     os.unlink("Test1_resources.svg")
 
+
 ################################################################################
 # Resource budgeting feature
 ################################################################################
+
 
 def test_resource_has_attribute_price(flat_project):
     # refactoring of the resource schema to change Resource.cost to Resource.price
@@ -644,6 +673,7 @@ def test_resource_has_attribute_price(flat_project):
     assert hasattr(gantt.resources["Martin"], "price")
     assert hasattr(gantt.resources["Samuel"], "price")
 
+
 def test_gantt_reader_can_define_new_units(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -651,6 +681,7 @@ def test_gantt_reader_can_define_new_units(flat_project):
     gantt.define_unit("foo = 1 * hour = ⧘ = wiggly_foo")
     assert "foo" in gantt.registry
     assert "wiggly_foo" in gantt.registry
+
 
 def test_gantt_reader_can_make_units_alias(flat_project):
     project_def = ProjectReader(flat_project)
@@ -666,6 +697,7 @@ def test_gantt_reader_can_make_units_alias(flat_project):
     gantt.define_alias("@alias workday = foo3")
     assert "foo3" in gantt.registry
     assert gantt.registry.foo3 == gantt.registry.workday
+
 
 def test_project_reader_reads_strips_spaces_from_task_resources():
     # make sure that all resource quantifiers are present as necessary
@@ -715,6 +747,7 @@ Projects:
 
     goals = project_def["tasks"]["goals"]["task"]
     assert goals["resources"] == ["1 Martin"]
+
 
 def test_gantt_reader_supports_scaled_resources():
     # DONE: gantt.tasks[name].resources must contain a gantt.Resource instance
@@ -793,6 +826,7 @@ Projects:
         and len(gantt.tasks) > 0
     )  # NOTE: milestone instance isinstance (..., Task) == True so must discriminate by class name
 
+
 def test_resource_instance_is_monkey_patched_get_unit(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -801,6 +835,7 @@ def test_resource_instance_is_monkey_patched_get_unit(flat_project):
     assert hasattr(gantt.resources["Samuel"], "get_unit")
     assert gantt.resources["Martin"].get_unit() == "workhour"
     assert gantt.resources["Samuel"].get_unit() == "workday"
+
 
 @pytest.mark.skip("later version")
 def test_resource_instance_has_category_attribute(flat_project):
@@ -812,6 +847,7 @@ def test_resource_instance_has_category_attribute(flat_project):
     assert gantt.resources["Martin"].category is None
     assert gantt.resources["Samuel"].category is None
 
+
 @pytest.mark.skip("later version")
 def test_resource_instance_has_subcategory_attribute(flat_project):
     project_def = ProjectReader(flat_project)
@@ -822,6 +858,7 @@ def test_resource_instance_has_subcategory_attribute(flat_project):
     assert gantt.resources["Martin"].subcategory is None
     assert gantt.resources["Samuel"].subcategory is None
 
+
 def test_resource_instance_is_monkey_patched_get_price(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -830,6 +867,7 @@ def test_resource_instance_is_monkey_patched_get_price(flat_project):
     assert hasattr(gantt.resources["Samuel"], "get_price")
     assert gantt.resources["Martin"].get_price() == 68.75
     assert gantt.resources["Samuel"].get_price() == 600
+
 
 def test_resource_instance_is_monkey_patched_convert(flat_project):
     project_def = ProjectReader(flat_project)
@@ -840,6 +878,7 @@ def test_resource_instance_is_monkey_patched_convert(flat_project):
     assert gantt.resources["Martin"].convert("workday") == 550
     assert gantt.resources["Samuel"].convert("workday") == 600
     assert gantt.resources["Samuel"].convert("workweek") == pytest.approx(3000)
+
 
 def test_resource_instance_is_monkey_patched_forbid_holidays_for_some_units():
     # if a resource has unit unit/batch then raise valueerror if it defines a holiday
@@ -931,6 +970,7 @@ Projects:
     with pytest.raises(ValueError):
         gantt = GanttDrawer(proj2_def)
 
+
 def test_task_instance_is_monkeypatched_is_using(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -938,6 +978,7 @@ def test_task_instance_is_monkeypatched_is_using(flat_project):
     assert hasattr(gantt.tasks["goals"], "is_using")
     assert gantt.tasks["goals"].is_using("Martin") == True
     assert gantt.tasks["goals"].is_using("Samuel") == False
+
 
 def test_task_instance_is_monkeypatched_is_active(flat_project):
     # a task is active on the day when it is running.
@@ -958,6 +999,7 @@ def test_task_instance_is_monkeypatched_is_active(flat_project):
     assert gantt.tasks["Env setup"].is_active("2022-09-07") == True
     assert gantt.tasks["Env setup"].is_active("2022-09-08") == False
 
+
 def test_ganttdrawer_get_unit(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -965,6 +1007,7 @@ def test_ganttdrawer_get_unit(flat_project):
     assert hasattr(gantt, "get_unit")
     assert gantt.get_unit("Martin") == "workhour"
     assert gantt.get_unit("Samuel") == "workday"
+
 
 def test_ganttdrawer_get_price(flat_project):
     project_def = ProjectReader(flat_project)
@@ -974,14 +1017,16 @@ def test_ganttdrawer_get_price(flat_project):
     assert gantt.get_price("Martin") == 68.75
     assert gantt.get_price("Samuel") == 600
 
+
 def test_ganttdrawer_get_usage(flat_project):
     # return the quantity that a resource is used in a specified task in a project
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
     gantt = GanttDrawer(project_def)
     assert hasattr(gantt, "get_usage")
-    assert gantt.get_usage( "goals", "Martin") == 1
-    assert gantt.get_usage( "goals", "Samuel") == 0
+    assert gantt.get_usage("goals", "Martin") == 1
+    assert gantt.get_usage("goals", "Samuel") == 0
+
 
 def test_ganttdrawer_is_available(flat_project):
     project_def = ProjectReader(flat_project)
@@ -997,6 +1042,7 @@ def test_ganttdrawer_is_available(flat_project):
     # available date
     assert gantt.is_available("Martin", "2022-09-05") == True
 
+
 def test_ganttdrawer_is_using(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -1007,6 +1053,7 @@ def test_ganttdrawer_is_using(flat_project):
     assert gantt.is_using("goals", "Samuel") == False
     # available date
     assert gantt.is_using("goals", "Martin") == True
+
 
 def test_ganttdrawer_get_cost(flat_project):
     # gantt.convert(resource) * gantt.get_usage(task, resource) * gantt.is_available(resource, date) * gantt.is_using(resource) * gantt.is_active(task, date)
@@ -1019,6 +1066,7 @@ def test_ganttdrawer_get_cost(flat_project):
     assert gantt.get_cost("goals", "Martin", "2022-09-06") == 137.5
     assert gantt.get_cost("goals", "Samuel", "2022-09-06") == 0
 
+
 def test_ganttdrawer_budget_flat_def(flat_project):
     project_def = ProjectReader(flat_project)
     project_def, _ = project_def.build_project()
@@ -1027,16 +1075,29 @@ def test_ganttdrawer_budget_flat_def(flat_project):
 
     # unavailable date within project range
 
-    check = pd.DataFrame([
-        ['Test1', 'goals', 'Martin', '', '', datetime.date(2022, 9, 6), 137.5],
-        ['Test1', 'Env setup', 'Martin', '', '', datetime.date(2022, 9, 7), 550.0]
-    ], columns = ['project', 'task', 'resource', 'category', 'subcategory', 'date', 'amount'])
+    check = pd.DataFrame(
+        [
+            ["Test1", "goals", "Martin", "", "", datetime.date(2022, 9, 6), 137.5],
+            ["Test1", "Env setup", "Martin", "", "", datetime.date(2022, 9, 7), 550.0],
+        ],
+        columns=[
+            "project",
+            "task",
+            "resource",
+            "category",
+            "subcategory",
+            "date",
+            "amount",
+        ],
+    )
 
     assert gantt.budget().equals(check)
+
 
 ################################################################################
 # \BUGFIXES
 ################################################################################
+
 
 def test_patch_bug_C50565():
     """BUGFIX: C50565 a project without any task dependency does not produce project outputs"""
@@ -1085,6 +1146,7 @@ Projects:
     assert pathlib.Path("test_project_1.svg").is_file()
     os.unlink("test_project_1.svg")
 
+
 def test_patch_bug_E17FB6():
     """BUGFIX: E17FB6 wrong csv task definition prevents project creation"""
     project_str = """
@@ -1129,6 +1191,7 @@ Projects:
     gantt.draw_tasks(project="test_project_2")
     assert pathlib.Path("test_project_2.svg").is_file()
     os.unlink("test_project_2.svg")
+
 
 def test_patch_bug_A14E36():
     """
@@ -1183,6 +1246,7 @@ Projects:
     os.unlink("test_project_3_pert.gv")
     os.unlink("test_project_3_pert.pdf")
 
+
 def test_patch_bug_0C501D():
     """
     \BUGFIX: 0C501D pertdrawer returns pert graphviz drawing string to stdout and gets reflected in the hidden output of the project definition
@@ -1195,9 +1259,11 @@ def test_patch_bug_0C501D():
     """
     pass
 
+
 ################################################################################
 # CLI
 ################################################################################
+
 
 @pytest.mark.skip("Not Implemented")
 def test_command_line_interface():

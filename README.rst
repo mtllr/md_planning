@@ -34,13 +34,13 @@ sources:
 Features
 --------
 
-* DONE: define a project with yaml syntax
-* DONE: draw project task PERT diagram
-* DONE: get project task critical path
-* DONE: draw project resource usage diagram
-* DONE: draw project gantt diagram on daily, weekly, monthly and quarterly basis
-* DONE: make a budget estimate from tasks' resource use
-* TODO: support for nested tasks
+* define a project with yaml syntax
+* draw project task PERT diagram
+* get project task critical path
+* draw project resource usage diagram
+* draw project gantt diagram on daily, weekly, monthly and quarterly basis
+* make a budget estimate from tasks' resource use
+* support for nested tasks (nested milestones/yaml syntax)
 
 Credits
 -------

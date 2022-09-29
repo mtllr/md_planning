@@ -157,6 +157,176 @@ Task.is_active = _is_active
 ################################################################################
 # Utility functions
 ################################################################################
+
+@singledispatch
+def normalize_task(task: Any):
+    """
+    normalize_task changes a list defined task to a dict defined task.
+
+    :param task: task defined as a list
+    :type task: list
+    :raises NotImplementedError: if the task type is not a recognised format
+    """
+    raise NotImplementedError
+
+
+@normalize_task.register(dict)
+def _(task: dict):
+    return task
+
+
+@normalize_task.register(list)
+def _(task: list):
+    keys = {
+        "start": None,
+        "duration": None,
+        "percent_done": 0,
+        "resources": [],
+        "depends_on": [],
+        "color": None,
+        "best": None,
+        "optimal": None,
+        "worst": None,
+        "is_milestone": False
+    }
+    res = {}
+    for ind, (k, default) in enumerate(keys.items()):
+        try:
+            res[k] = task[ind]
+        except IndexError:
+            res[k] = default
+    return res
+
+
+@singledispatch
+def get_duration(task: Any):
+    """
+    get_duration makes the duration of a task primarily from the estimated task durations and if not available, the actual duration data.
+
+    :param task: the task definition
+    :type task: Union[dict, list]
+    :raises NotImplementedType: types other than dict and list will raise error
+    """
+    raise NotImplementedError
+
+
+@get_duration.register(dict)
+def _(task: dict):
+    if all(["best" in task, "optimal" in task, "worst" in task]):
+        return round((task["best"] + 4 * task["optimal"] + task["worst"]) / 6, 3)
+    else:
+        return round(task["duration"], 3)
+
+
+@get_duration.register(list)
+def _(task: list):
+    # {
+    #     "start": None,
+    #     "duration": None,
+    #     "percent_done": 0,
+    #     "resources": [],
+    #     "depends_on": [],
+    #     "color": None,
+    #     "best": None,
+    #     "optimal": None,
+    #     "worst": None,
+    # }
+    if len(task) == 9:
+        return round((task[6] + 4 * task[7] + task[8]) / 6, 3)
+    else:
+        return round(task[1], 3)
+
+@singledispatch
+def _get_resources(res: Any):
+    """
+    _get_resources helper function that returns resources in a project compatible format.
+
+    :param res: resource
+    :type res: Union[str, list, None]
+    :raises NotImplementedError: if the data is not in a recognised format
+    :return: the list of resources used by the task
+    :rtype: List[str]
+    """
+    if res is None:
+        return []
+    raise NotImplementedError
+
+@_get_resources.register(str)
+def _(res: str):
+    if "," in res:
+        return [r.strip() for r in res.split(",")]
+    else:
+        return[res.strip()]
+
+@_get_resources.register(list)
+def _(res: list):
+    return res
+
+@singledispatch
+def get_resources(task: Any):
+    """
+    get_resources is a helper function that returns the resources used in a task in a project compatible format.
+
+    Works on dict defined tasks and list defined tasks.
+
+    :param task: the task description
+    :type task: Union[dict, list]
+    :raises NotImplementedError: if the task format is not recognised.
+    :return: list of resource names
+    :rtype: List[str]
+    """
+    raise NotImplementedError
+
+@get_resources.register(dict)
+def _(task: dict):
+    return _get_resources(task["resources"])
+
+@get_resources.register(list)
+def _(task: list):
+    return _get_resources(task[3])
+
+@singledispatch
+def _get_dependencies(deps: Any):
+    if deps is None:
+        return []
+    raise NotImplementedError
+
+@_get_dependencies.register(str)
+def _(deps: str):
+    if  "," in deps:
+        return list(map(lambda s: s.strip() , deps.split(",")))
+    else:
+        return [deps]
+
+@_get_dependencies.register(list)
+def _(deps: list):
+    return deps
+
+
+@singledispatch
+def get_dependencies(task: Any):
+    """
+    get_dependencies get the dependencies from a task definition.
+
+    Works on dict and list defined tasks
+
+    :param task: the task definition
+    :type task: Union[dict, list]
+    :raises NotImplementedError: if the task definition is not recognised
+    """
+    raise NotImplementedError
+
+
+@get_dependencies.register(dict)
+def _(task: dict):
+    return _get_dependencies(task["depends_on"])
+
+
+@get_dependencies.register(list)
+def _(task: list):
+    return _get_dependencies(task[4])
+
+
 def rename(
     dict_in: dict,
     key_from: str,
@@ -198,12 +368,10 @@ def get_task_type(item: Any) -> Union[str, None]:
 @get_task_type.register(dict)
 def _(item: Dict) -> Union[str, None]:
     # flat list of tasks
-    if "type" in item:
-        itype = item.get("type")
-        assert itype in ["task", "milestone"], "Unknown task type"
-        return itype
+    if "percent_done" in item:
+        return "task"
     # nested list of milestones and tasks
-    raise NotImplementedError("Nested tasks not supported")
+    return "milestone"
 
 
 @get_task_type.register(list)
@@ -211,6 +379,98 @@ def _(item: List) -> Union[str, None]:
     return "task"
 
 
+def is_nested(tasks: dict) -> bool:
+    """
+    is_nested recognizes the project format to determine if the tasks definition is in the flat or the nested format.
+
+    :param tasks: full project task definition
+    :type tasks: dict
+    :return: is it a nested definition T/F
+    :rtype: bool
+    """
+    for task in tasks.values():
+        if isinstance(task, list):
+            continue
+        for value in task.values():
+            if isinstance(value, dict):
+                return True
+    return False
+
+
+def _walk(path, child):
+    if isinstance(child, dict):
+        if get_task_type(child) == "task":
+            child["is_milestone"] = False
+            yield [tuple(path), child]
+        else:
+            for key, value in child.items():
+                if get_task_type(value) == "milestone":
+                    yield [tuple(path + [key]), {"is_milestone": True}]
+                yield from _walk(path + [key], value)
+    else:
+        yield [tuple(path), child]
+
+
+def walk_project(tasks: dict):
+    """
+    walk_project returns normalized tasks in a nested or flat project configuration
+
+    :param tasks: project tasks
+    :type tasks: dict
+    :return: list of task_name, task_definition
+    :rtype: List[Tuple(str, dict)]
+    """
+    if is_nested(tasks):
+        res = [(pth, normalize_task(tsk)) for (pth, tsk) in list(_walk([], tasks))]
+
+        milestones = list(sorted(
+            filter(lambda i: not isinstance(i[1], list) and i[1]["is_milestone"], res),
+            key=lambda m: len(m[0]),
+            reverse=True,
+        ))
+
+        _tasks = list(sorted(
+            filter(lambda i: isinstance(i[1], list) or not i[1]["is_milestone"], res),
+            key=lambda m: len(m[0]),
+            reverse=True,
+        ))
+
+        for milestone in milestones:
+            milestone_path_len = len(milestone[0])
+            project = Node(milestone[0][-1])
+            for subtask in filter(
+                lambda task: len(task[0]) == milestone_path_len + 1
+                and task[0][-2] == milestone[0][-1],
+                res,
+            ):  # 1 level below milestone and subtask of milestone
+                project.add(
+                    Node(
+                        subtask[0][-1],
+                        duration=get_duration(subtask[1]),
+                        lag=0,
+                    )
+                )
+            project.update_all()
+            critical_path = list(map(lambda i: i.name, project.get_critical_path()))
+            milestone[1]["depends_on"] = critical_path[-1]
+            milestone[1]["duration"] = project.duration
+            milestone[1]["first_node"] = critical_path[0]
+            milestone[1]["last_node"] = critical_path[-1]
+
+        # replace all tasks that depend on a milestone to its last node
+        milestone_ids = [i[0][-1] for i in milestones]
+        for task in _tasks:
+            dependencies = get_dependencies(task[1])
+            task[1]["depends_on"] = [ get_dependencies(list(filter(lambda _milst: _milst[0][-1]==m,milestones))[0][1]) if m==d else d for d in dependencies for m in milestone_ids]
+
+        return  [(task[0][-1], task[1]) for task in res]
+    else:
+        return list(tasks.items())
+
+
+################################################################################
+# Project reader class
+################################################################################
 class ProjectReader:
     """
     Utility for reading raw project data.
@@ -242,7 +502,9 @@ class ProjectReader:
             tasks: dict = project.get("Tasks")
 
             # building the task items in each projects
-            for name, task in tasks.items():
+            # this is where we will walk the tasks
+            # anchor walk_project
+            for name, task in walk_project(project.get("Tasks")):
                 tmp = {
                     "project": proj_name,
                     "task": {
@@ -313,17 +575,19 @@ class ProjectReader:
                         ]
 
                     # format resources and depends_on
-                    resources = task.get("resources", [])
-                    if resources is None:
-                        resources = []
-                    elif isinstance(resources, str) and "," in resources:
-                        resources = [r.strip() for r in resources.split(",")]
-                    elif isinstance(resources, str) and "," not in resources:
-                        resources = [resources.strip()]
-                    elif isinstance(resources, list):
-                        pass
-                    else:
-                        raise ValueError(f"Unknown resource format type: {resources}")
+                    # resources = task.get("resources", [])
+                    # if resources is None:
+                    #     resources = []
+                    # elif isinstance(resources, str) and "," in resources:
+                    #     resources = [r.strip() for r in resources.split(",")]
+                    # elif isinstance(resources, str) and "," not in resources:
+                    #     resources = [resources.strip()]
+                    # elif isinstance(resources, list):
+                    #     pass
+                    # else:
+                    #     raise ValueError(f"Unknown resource format type: {resources}")
+
+                    resources = get_resources(task)
 
                     regex = re.compile(r"^(\d+\.?\d*)\s+(\w+)$")
                     for ind, resource in enumerate(resources):
@@ -332,22 +596,25 @@ class ProjectReader:
 
                     task["resources"] = resources  # type: ignore
 
-                    # XXX: anchor depends_on
-                    depends_on = task.get("depends_on")
-                    if depends_on is None:
-                        depends_on = []
-                    elif isinstance(depends_on, str) and "," in depends_on:
-                        depends_on = depends_on.split(",")
-                    elif isinstance(depends_on, str) and "," not in depends_on:
-                        depends_on = [depends_on]
-                    elif isinstance(depends_on, list):
-                        pass
-                    else:
-                        raise ValueError(
-                            f"Unknown depends_on format type: {depends_on}"
-                        )
 
-                    task["depends_on"] = depends_on  # type: ignore
+                    # XXX: anchor depends_on
+                    # depends_on = task.get("depends_on")
+                    # if depends_on is None:
+                    #     depends_on = []
+                    # elif isinstance(depends_on, str) and "," in depends_on:
+                    #     depends_on = depends_on.split(",")
+                    # elif isinstance(depends_on, str) and "," not in depends_on:
+                    #     depends_on = [depends_on]
+                    # elif isinstance(depends_on, list):
+                    #     pass
+                    # else:
+                    #     raise ValueError(
+                    #         f"Unknown depends_on format type: {depends_on}"
+                    #     )
+
+                    # task["depends_on"] = depends_on  # type: ignore
+
+                    task["depends_on"] = get_dependencies(task)
 
                     ### state: task is massaged and ready to  make object definitions ###
 
@@ -485,6 +752,9 @@ class ProjectReader:
         return (project_data, pertchart_data)
 
 
+################################################################################
+# Pert drawer class
+################################################################################
 class PertDrawer:
     """
     PertParser takes a python dictionary in and extracts the pert data.
@@ -504,22 +774,21 @@ class PertDrawer:
         """
         self.tasks: dict = tasks
 
-    def draw(self, project: Union[str, None] = None) -> None:
+    def draw(
+        self, project: Union[str, None] = None, out: Union[str, None] = None
+    ) -> None:
         """
-        Draw the network of tasks in self.tasks.
+        draw Draws the network of tasks in self.tasks.
 
-        :param project: name of the project, if None then returns the first
-        project, defaults to None
+        :param project: name of the project otherwise all projects tasks will be analysed together, defaults to None
         :type project: Union[str, None], optional
-        :param out: name of the file for the output, if None the defaults to
-        PERT.gv.pdf, defaults to None
+        :param out: prefix name of the files to output, will default to the name of the project to output "project_pert.pdf" and "project_pert.gv" (graphviz file)
         :type out: Union[str, None], optional
-        :return: pdf file of the task network
-        :rtype: None
         """
         if project is None:
             _projects = [k for k in self.tasks]
         else:
+            # XXX: this is not of the same type as the definition above...
             _projects = [project]
 
         pert = pertchart.PertChart()
@@ -533,9 +802,11 @@ class PertDrawer:
 
             # see bugfix A14E36
             if pathlib.Path("PERT.gv.pdf").is_file():
-                shutil.move("PERT.gv.pdf", f"{proj}_pert.pdf")
+                shutil.move(
+                    "PERT.gv.pdf", f"{out}_pert.pdf" if out else f"{proj}_pert.pdf"
+                )
             if pathlib.Path("PERT.gv").is_file():
-                shutil.move("PERT.gv", f"{proj}_pert.gv")
+                shutil.move("PERT.gv", f"{out}_pert.gv" if out else f"{proj}_pert.gv")
 
     # XXX: (refactor) not evidently useful usecase
     def get_critical_path(self, project: str):
@@ -549,6 +820,9 @@ class PertDrawer:
         raise NotImplementedError
 
 
+################################################################################
+# Gantt drawer class
+################################################################################
 class GanttDrawer:
     """
     Gantt project representation from a yaml file definition.
