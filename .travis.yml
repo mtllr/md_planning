@@ -9,10 +9,11 @@ script: tox
 deploy:
   provider: pypi
   distributions: sdist bdist_wheel
-  user: mtllr
+  user: __token__
   password:
     secure: ryC/UsGa4MWIXEqo3UKmpP3KWUyniNRJW4Q/E1XY4uaqupPbGRI63UDZVuACOf3/bUYsrvhdApqYYwGSjBQfFLgahTxOYsoGXS4TDFfPOGCwnmPzMiBI8WaX8lFm5hovfIyedFnR/qIG1AIXJSYtCJfL2JTr3NVfnvV/rEWoleVe452JfWtxC60+MmO5ssroLYsy7FnrJQokhhKhuYjK24JLTLI6qbJE983blkWwWbroCS0KPQb35mZkWcz3fisk/cE+LV0oHQHaSkWhoprIBjTjcrN8SpTORk3MKF4gANvWmwJalkWZrEPxn/maMmg61k5OgJ/i6t8p2OBoJX8yTRLCmjgsKzoFycoZTJpSXPLtyr63rQ6CmbkrN2IkoP6XBm0Xa93VE/B9bocjzyQz8PW2hVMi3UjCUQEtkvtmH7/Ka/YvnB7btsKyVHmQl/pFHAbFrU21VQwDsapbhJDoQ3F4l4R8hnsBLN5vhIuAFJWiI3TlGh/eTvmQtLedh9di+q0yxMazGTiCxSzdlR9gvyTdc5SH8i7He8h3cNBkMj51lgdfJH++z4SA2u/hSPv1UFb5FsNF1R87O1ejjrOICo5634E9+BrNRpCSJntovz1W5MfL8flmJzqrT1wHANlM0KaZ8NJd+tUbqb7uorTd4QPDprJsWG+mLGAWumoVB6g=
   on:
     tags: true
+    branch: master
     repo: mtllr/md_planning
     python: 3.8

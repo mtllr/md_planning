@@ -20,6 +20,11 @@ from math import ceil
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from os import devnull
 
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+# debugpy.breakpoint()
+
 ##### Work Units #####
 
 # tailored pint unit registry (overridable) for project management
@@ -113,10 +118,6 @@ def _resource_convert(
     Q_ = self.get_registry()
 
     if self.get_unit() == "unit":
-        # import debugpy
-        # debugpy.listen(5678)
-        # debugpy.wait_for_client()
-        # debugpy.breakpoint()
         quantity = Q_(f"{self.get_price()} / {number_of_days} / workday")
     elif self.get_unit() == "batch":
         quantity = Q_(
@@ -158,6 +159,81 @@ Task.is_active = _is_active
 # Utility functions
 ################################################################################
 
+
+def _normalize_resources(task: dict) -> dict:
+    res = deepcopy(task)
+    if "resources" in res and isinstance(res["resources"], str):
+        if "," in res["resources"]:  # type: ignore
+            res["resources"] = list(map(lambda s: s.strip(), res["resources"].split(",")))
+        else:
+            res["resources"] = [res["resources"].strip()]
+
+        regex = re.compile(r"^(\d+\.?\d*)\s+(\w+)$")
+        for ind, resource in enumerate(res["resources"]):
+            if regex.match(resource) is None:
+                res["resources"][ind] = f"1 {resource}"
+
+    if "resources" in res and res["resources"] is None:
+        res["resources"] = []
+
+    return res
+
+
+def _normalize_duration(task: dict) -> dict:
+    res = deepcopy(task)
+    if res.get("duration") is None:  # then best, optimal and worst are defined
+        res["duration"] = round(
+            (res["best"] + 4 * res["optimal"] + res["worst"]) / 6, 3
+        )
+    else:  # no variability in the duration
+        res["best"] = res["optimal"] = res["worst"] = res["duration"]
+    return res
+
+
+def _normalize_depends_on(task: dict) -> dict:
+    # make sure parent tasks are in the form of List[str]
+    res = deepcopy(task)
+    if "depends_on" in res:
+        if isinstance(res["depends_on"], str):
+            if "," in res["depends_on"]:
+                res["depends_on"] = list(
+                    map(lambda s: s.strip(), res["depends_on"].split(","))
+                )
+            else:
+                res["depends_on"] = [res["depends_on"].strip()]
+        elif res["depends_on"] is None:
+            res["depends_on"] = []
+        else:
+            pass
+    return res
+
+
+def _normalize_list_task(task: Union[list, dict]) -> dict:
+    if isinstance(task, list):
+        keys = {
+            "start": None,
+            "duration": None,
+            "percent_done": 0,
+            "resources": [],
+            "depends_on": [],
+            "color": None,
+            "best": None,
+            "optimal": None,
+            "worst": None,
+        }
+        res = {"type": "task"}
+        for ind, (k, default) in enumerate(keys.items()):
+            try:
+                res[k] = task[ind]
+            except IndexError:
+                res[k] = default
+        return res
+    elif isinstance(task, dict):
+        return task
+    else:
+        raise ValueError(f"Unknown task definition {task}")
+
+
 @singledispatch
 def normalize_task(task: Any):
     """
@@ -187,7 +263,7 @@ def _(task: list):
         "best": None,
         "optimal": None,
         "worst": None,
-        "is_milestone": False
+        "is_milestone": False,
     }
     res = {}
     for ind, (k, default) in enumerate(keys.items()):
@@ -212,10 +288,21 @@ def get_duration(task: Any):
 
 @get_duration.register(dict)
 def _(task: dict):
-    if all(["best" in task, "optimal" in task, "worst" in task]):
+    if all(
+        [
+            task.get("best") is not None,
+            task.get("optimal") is not None,
+            task.get("worst") is not None,
+        ]
+    ):  # \BUGFIX 406D86
         return round((task["best"] + 4 * task["optimal"] + task["worst"]) / 6, 3)
     else:
-        return round(task["duration"], 3)
+        try:
+            return round(task["duration"], 3)
+        except KeyError:
+            raise ValueError(
+                "Task must define either ('best', 'optimal', 'worst') or 'duration'."
+            )
 
 
 @get_duration.register(list)
@@ -236,6 +323,7 @@ def _(task: list):
     else:
         return round(task[1], 3)
 
+
 @singledispatch
 def _get_resources(res: Any):
     """
@@ -251,16 +339,19 @@ def _get_resources(res: Any):
         return []
     raise NotImplementedError
 
+
 @_get_resources.register(str)
 def _(res: str):
     if "," in res:
         return [r.strip() for r in res.split(",")]
     else:
-        return[res.strip()]
+        return [res.strip()]
+
 
 @_get_resources.register(list)
 def _(res: list):
     return res
+
 
 @singledispatch
 def get_resources(task: Any):
@@ -277,13 +368,16 @@ def get_resources(task: Any):
     """
     raise NotImplementedError
 
+
 @get_resources.register(dict)
 def _(task: dict):
     return _get_resources(task["resources"])
 
+
 @get_resources.register(list)
 def _(task: list):
     return _get_resources(task[3])
+
 
 @singledispatch
 def _get_dependencies(deps: Any):
@@ -291,12 +385,14 @@ def _get_dependencies(deps: Any):
         return []
     raise NotImplementedError
 
+
 @_get_dependencies.register(str)
 def _(deps: str):
-    if  "," in deps:
-        return list(map(lambda s: s.strip() , deps.split(",")))
+    if "," in deps:
+        return list(map(lambda s: s.strip(), deps.split(",")))
     else:
         return [deps]
+
 
 @_get_dependencies.register(list)
 def _(deps: list):
@@ -362,12 +458,15 @@ def get_task_type(item: Any) -> Union[str, None]:
     :return: the item tag type
     :rtype: str
     """
-    raise NotImplementedError(f"Cannot handle data type {type(item)}")
+    return None
 
 
 @get_task_type.register(dict)
-def _(item: Dict) -> Union[str, None]:
+def _(item: Dict):
     # flat list of tasks
+    res = item.get("type")
+    if res in ["task", "milestone"]:
+        return res
     if "percent_done" in item:
         return "task"
     # nested list of milestones and tasks
@@ -375,7 +474,7 @@ def _(item: Dict) -> Union[str, None]:
 
 
 @get_task_type.register(list)
-def _(item: List) -> Union[str, None]:
+def _(item: List):
     return "task"
 
 
@@ -383,17 +482,22 @@ def is_nested(tasks: dict) -> bool:
     """
     is_nested recognizes the project format to determine if the tasks definition is in the flat or the nested format.
 
+    if any task is a milestone and contains another task then is_nested==True
+
     :param tasks: full project task definition
     :type tasks: dict
     :return: is it a nested definition T/F
     :rtype: bool
+
+    :BUGFIX: E17FB6 and  39651C
     """
     for task in tasks.values():
-        if isinstance(task, list):
+        if get_task_type(task) == "task":
             continue
-        for value in task.values():
-            if isinstance(value, dict):
-                return True
+        else:  # is milestone
+            for value in task.values():
+                if get_task_type(value) in ["task", "milestone"]:
+                    return True
     return False
 
 
@@ -411,7 +515,7 @@ def _walk(path, child):
         yield [tuple(path), child]
 
 
-def walk_project(tasks: dict):
+def walk_project_tasks(tasks: dict):
     """
     walk_project returns normalized tasks in a nested or flat project configuration
 
@@ -423,47 +527,122 @@ def walk_project(tasks: dict):
     if is_nested(tasks):
         res = [(pth, normalize_task(tsk)) for (pth, tsk) in list(_walk([], tasks))]
 
-        milestones = list(sorted(
-            filter(lambda i: not isinstance(i[1], list) and i[1]["is_milestone"], res),
-            key=lambda m: len(m[0]),
-            reverse=True,
-        ))
+        milestones = list(
+            sorted(
+                filter(
+                    lambda i: not isinstance(i[1], list) and i[1]["is_milestone"], res
+                ),
+                key=lambda m: len(m[0]),
+                reverse=True,
+            )
+        )
+        # milestone_ids = [i[0][-1] for i in milestones]
 
-        _tasks = list(sorted(
-            filter(lambda i: isinstance(i[1], list) or not i[1]["is_milestone"], res),
-            key=lambda m: len(m[0]),
-            reverse=True,
-        ))
+        _tasks = list(
+            sorted(
+                filter(
+                    lambda i: isinstance(i[1], list) or not i[1]["is_milestone"], res
+                ),
+                key=lambda m: len(m[0]),
+                reverse=True,
+            )
+        )
 
+        # replace all milestones depends_on that depend on a milestone or a group of tasks
         for milestone in milestones:
             milestone_path_len = len(milestone[0])
-            project = Node(milestone[0][-1])
-            for subtask in filter(
-                lambda task: len(task[0]) == milestone_path_len + 1
-                and task[0][-2] == milestone[0][-1],
-                res,
-            ):  # 1 level below milestone and subtask of milestone
-                project.add(
-                    Node(
-                        subtask[0][-1],
-                        duration=get_duration(subtask[1]),
-                        lag=0,
-                    )
+            # project = Node(milestone[0][-1])
+            subtasks = list(
+                filter(
+                    lambda task: len(task[0]) == milestone_path_len + 1
+                    and task[0][-2] == milestone[0][-1],
+                    res,
                 )
-            project.update_all()
-            critical_path = list(map(lambda i: i.name, project.get_critical_path()))
-            milestone[1]["depends_on"] = critical_path[-1]
-            milestone[1]["duration"] = project.duration
-            milestone[1]["first_node"] = critical_path[0]
-            milestone[1]["last_node"] = critical_path[-1]
+            )
 
-        # replace all tasks that depend on a milestone to its last node
-        milestone_ids = [i[0][-1] for i in milestones]
-        for task in _tasks:
-            dependencies = get_dependencies(task[1])
-            task[1]["depends_on"] = [ get_dependencies(list(filter(lambda _milst: _milst[0][-1]==m,milestones))[0][1]) if m==d else d for d in dependencies for m in milestone_ids]
+            # for subtask in subtasks:  # 1 level below milestone and subtask of milestone
+            #     try:
+            #         if subtask[1]["is_milestone"]:
+            #             dep_names = get_dependencies(subtask[1])
+            #             for dep in dep_names:
+            #                 _t = list(filter(lambda t: t[0][-1]==dep, _tasks))[0]
+            #                 project.add(
+            #                     Node(dep, duration=get_duration(subtask[1]), lag=0)
+            #                 )
+            #         else:
+            #             project.add(
+            #                 Node(
+            #                     subtask[0][-1],
+            #                     duration=get_duration(subtask[1]),
+            #                     lag=0,
+            #                 )
+            #             )
+            #     except Exception as err:
+            #         raise ValueError(f"Definition error at {subtask[0][-1]}") from err
 
-        return  [(task[0][-1], task[1]) for task in res]
+            # add dependencies
+            # for subtask in subtasks:
+            #     if (deps:=get_dependencies(subtask[1])):
+            #         updated_deps = []
+
+            #         for dep in deps: # not dependency but parent really...
+            #             # update milestone dependency to last node in critical path
+            #             if dep in milestone_ids:
+            #                 updated_deps.append(get_dependencies(list(filter(lambda m: m[0][-1] == dep, milestones))[0][1])[0]) # there is only one last task on critical path
+            #             else:
+            #                 updated_deps.append(dep)
+
+            #         # filter updated_deps to tasks strictly within descendants of the current milestone
+            #         # subtasks_names = [s[0][-1] for s in subtasks]
+            #         # updated_deps = [d for d in updated_deps if d in subtasks_names]
+
+            #         # build project links
+            #         for _d in updated_deps:
+            #             try:
+            #                 project.link(_d, subtask[0][-1])
+            #             except Exception as err:
+            #                 # raise ValueError(f"Cannot link {subtask[0][-1]} and {_d}") from err
+            #                 node = Node(
+            #                     _d,
+            #                     duration=0,
+            #                     lag=0,
+            #                 )
+            #                 project.add(node)
+            #                 project.link(_d, subtask[0][-1])
+
+            # project.update_all()
+            # critical_path = list(map(lambda i: i.name, project.get_critical_path()))
+            # milestone[1]["depends_on"] = [critical_path[0], critical_path[-1]]
+            milestone[1]["depends_on"] = [subtask[0][-1] for subtask in subtasks]
+            # milestone[1]["duration"] = project.duration
+            milestone[1]["duration"] = 0
+            # milestone[1]["first_node"] = critical_path[0]
+            # milestone[1]["last_node"] = critical_path[-1]
+
+        # # replace all tasks that depend on a milestone to its last node
+        # for task in _tasks:
+        #     try:
+        #         dependencies = get_dependencies(task[1])
+        #         # make a temporary result list
+        #         dependency_results = []
+        #         # for each item in dependencies
+        #         for dependency in dependencies:
+        #             #if item is a milestone and milestone in task['depends_on']
+        #             if dependency in milestone_ids:
+        #                 # get the milestone dependency
+        #                 _milestone = list(filter(lambda m: m[0][-1]==dependency, milestones))[0]
+        #                 # extend temp result list with this milestone's dependencies
+        #                 dependency_results.extend(get_dependencies(_milestone[1]))
+        #             # else:
+        #             else:
+        #                 dependency_results.append(dependency)
+        #                 #extend the temp result list with the current dependency
+        #         task[1]["depends_on"] = dependency_results
+        #         # task[1]["depends_on"] = [ get_dependencies(list(filter(lambda _milst: _milst[0][-1]==m,milestones))[0][1]) if m==d else d for d in dependencies for m in milestone_ids]
+        #     except Exception as err:
+        #         raise ValueError(f"Dependency error at {task[0][-1]}")
+
+        return [(task[0][-1], task[1]) for task in res]
     else:
         return list(tasks.items())
 
@@ -486,6 +665,7 @@ class ProjectReader:
         :projstr:: string representation of the project in yaml syntax
         :critical_color:: string/name/hex representation of the color for the tasks on the critical path
         """
+
         self.projstr = projstr
         self.data = yaml.safe_load(projstr)
         self.font = self.data.get("Font", {})
@@ -494,18 +674,19 @@ class ProjectReader:
         self.projects = {}
         self.tasks = {}
         self.pertcharts = {}
+
         for project in self.data.get("Projects", []):  # type: ignore
-            proj_name = project.get("Name", "")
+            proj_name = project.get("Name")
             if not proj_name:
                 raise ValueError("Missing project name")
             self.projects[proj_name] = None
             tasks: dict = project.get("Tasks")
 
-            # building the task items in each projects
-            # this is where we will walk the tasks
-            # anchor walk_project
-            for name, task in walk_project(project.get("Tasks")):
-                tmp = {
+            for name, task in walk_project_tasks(tasks):
+
+                ##### SETUP #####
+
+                payload = {
                     "project": proj_name,
                     "task": {
                         "name": name,
@@ -535,161 +716,78 @@ class ProjectReader:
                         "lag": 0,
                         "depends_of": None,
                     },
-                    "is_milestone": None,
+                    "is_milestone": False,
                 }
 
-                if get_task_type(task) == "task":
-                    tmp["is_milestone"] = False
+                ##### TRANSFORM #####
 
-                    if isinstance(task, list):
-                        keys = {
-                            "start": None,
-                            "duration": None,
-                            "percent_done": 0,
-                            "resources": [],
-                            "depends_on": [],
-                            "color": None,
-                            "best": None,
-                            "optimal": None,
-                            "worst": None,
-                        }
-                        tmp_fill = {"type": "task"}
-                        for ind, (k, default) in enumerate(keys.items()):
-                            try:
-                                tmp_fill[k] = task[ind]
-                            except IndexError:
-                                tmp_fill[k] = default
+                task = _normalize_list_task(task)
 
-                        task = tmp_fill
+                if (
+                    task.get("is_milestone", False)
+                    or task.get("type", "task") == "task"
+                ):
+                    try:
+                        task = _normalize_duration(task)
+                    except (TypeError, KeyError) as err:
+                        raise ValueError(
+                            f"Definition error for duration or estimates in task named {name}"
+                        ) from err
+                else:
+                    task["duration"] = 0
 
-                    # duration and pert estimations
-                    if (
-                        task.get("duration") is None
-                    ):  # then best, optimal and worst are defined
-                        task["duration"] = round(
-                            (task["best"] + 4 * task["optimal"] + task["worst"]) / 6, 3
-                        )
-                    else:  # no variability in the duration
-                        task["best"] = task["optimal"] = task["worst"] = task[
-                            "duration"
-                        ]
+                task = _normalize_depends_on(task)
 
-                    # format resources and depends_on
-                    # resources = task.get("resources", [])
-                    # if resources is None:
-                    #     resources = []
-                    # elif isinstance(resources, str) and "," in resources:
-                    #     resources = [r.strip() for r in resources.split(",")]
-                    # elif isinstance(resources, str) and "," not in resources:
-                    #     resources = [resources.strip()]
-                    # elif isinstance(resources, list):
-                    #     pass
-                    # else:
-                    #     raise ValueError(f"Unknown resource format type: {resources}")
+                task = _normalize_resources(task)
 
-                    resources = get_resources(task)
+                ##### UPDATE #####
 
-                    regex = re.compile(r"^(\d+\.?\d*)\s+(\w+)$")
-                    for ind, resource in enumerate(resources):
-                        if regex.match(resource) is None:
-                            resources[ind] = f"1 {resource}"
+                ##### CPM #####
+                payload["cpm"]["name"] = name
+                payload["cpm"]["duration"] = task["duration"]
+                payload["cpm"]["lag"] = 0
+                payload["cpm"]["depends_of"] = task.get("depends_on", None)
 
-                    task["resources"] = resources  # type: ignore
+                ##### PERTCHART #####
+                payload["pertchart"]["Tid"] = name
+                payload["pertchart"]["start"] = 0
+                payload["pertchart"]["duration"] = task["duration"]
+                payload["pertchart"]["end"] = 0
+                payload["pertchart"]["responsible"] = ""
+                payload["pertchart"]["pred"] = task.get("depends_on", ["START"])
+                if not payload["pertchart"]["pred"]:
+                    payload["pertchart"]["pred"] = ["START"]
 
+                ##### TASK #####
+                for k in payload["task"]:
+                    if k != "depends_on":
+                        payload["task"][k] = task.get(k, payload["task"][k])
+                payload["task"]["depends_of"] = task.get("depends_on", None)
 
-                    # XXX: anchor depends_on
-                    # depends_on = task.get("depends_on")
-                    # if depends_on is None:
-                    #     depends_on = []
-                    # elif isinstance(depends_on, str) and "," in depends_on:
-                    #     depends_on = depends_on.split(",")
-                    # elif isinstance(depends_on, str) and "," not in depends_on:
-                    #     depends_on = [depends_on]
-                    # elif isinstance(depends_on, list):
-                    #     pass
-                    # else:
-                    #     raise ValueError(
-                    #         f"Unknown depends_on format type: {depends_on}"
-                    #     )
+                ##### MILESTONE #####
+                if (
+                    task.get("is_milestone", False)
+                    or task.get("type", "task") == "milestone"
+                ):
+                    payload["is_milestone"] = True
 
-                    # task["depends_on"] = depends_on  # type: ignore
-
-                    task["depends_on"] = get_dependencies(task)
-
-                    ### state: task is massaged and ready to  make object definitions ###
-
-                    ##### CPM #####
-                    tmp["cpm"]["name"] = name
-                    tmp["cpm"]["duration"] = task["duration"]
-                    tmp["cpm"]["lag"] = 0
-                    tmp["cpm"]["depends_of"] = task.get("depends_on", None)
-
-                    ##### PERTCHART #####
-                    tmp["pertchart"]["Tid"] = name
-                    tmp["pertchart"]["start"] = 0
-                    tmp["pertchart"]["duration"] = task["duration"]
-                    tmp["pertchart"]["end"] = 0
-                    tmp["pertchart"]["responsible"] = ""
-                    tmp["pertchart"]["pred"] = task.get("depends_on", ["START"])
-                    if not tmp["pertchart"]["pred"]:
-                        tmp["pertchart"]["pred"] = ["START"]
-
-                    ##### TASK #####
-                    # copy task definition over
-                    for k in tmp["task"]:
-                        tmp["task"][k] = task.get(k, tmp["task"][k])
-
-                    # rename depends_on -> depends_of
-                    tmp["task"]["depends_of"] = task.get("depends_on", None)
-
-                    # make sure parent tasks are in the form of List[str]
-                    # XXX: flag duplicate function to lines 234-248? anchor depends_on
-                    if isinstance(tmp["task"]["depends_of"], str):
-                        if "," in tmp["task"]["depends_of"]:  # type: ingore
-                            tmp["task"]["depends_of"] = tmp["task"]["depends_of"].split(
-                                ","
+                    for k in payload["milestone"]:
+                        if k != "depends_on":
+                            payload["milestone"][k] = task.get(
+                                k, payload["milestone"][k]
                             )
-                        else:
-                            tmp["task"]["depends_of"] = [tmp["task"]["depends_of"]]
+                    payload["milestone"]["depends_of"] = task.get("depends_on", [])
 
-                    # make sure the resource definition is in the forma of List[str]
-                    if isinstance(tmp["task"]["resources"], str):
-                        if "," in tmp["task"]["resources"]:  # type: ignore
-                            tmp["task"]["resources"] = tmp["tasks"]["resources"].split(
-                                ","
-                            )
-                        else:
-                            tmp["tasks"]["resources"] = [tmp["tasks"]["resources"]]
-
-                else:  # milestone
-
-                    # milestone (is instance dict)
-                    tmp["is_milestone"] = True
-
-                    # no pert chart, no cpm, no resources
-                    for k in tmp["milestone"]:
-                        tmp["milestone"][k] = task.get(k, tmp["milestone"][k])
-                    tmp["milestone"]["depends_of"] = task.get("depends_on", [])
-                    if isinstance(tmp["milestone"]["depends_of"], str):
-                        if "," in tmp["milestone"]["depends_of"]:  # type: ignore
-                            tmp["milestone"]["depends_of"] = tmp["milestone"][
-                                "depends_of"
-                            ].split(",")
-                        else:
-                            tmp["milestone"]["depends_of"] = [
-                                tmp["milestone"]["depends_of"]
-                            ]
-
-                self.tasks[name] = tmp
+                self.tasks[name] = payload
 
             ##### State: Ready for post-processing #####
 
-            # calc criticial path and put in the pert chart responsible values
+            # CPM for PertChart
             critical_path = self._get_critical_path(
                 {
                     k: t["cpm"]
                     for (k, t) in self.tasks.items()
-                    if t["project"] == proj_name and not t["is_milestone"]
+                    if t["project"] == proj_name
                 }
             )
 
@@ -744,7 +842,7 @@ class ProjectReader:
             k: {
                 t["pertchart"]["Tid"]: t["pertchart"]
                 for t in self.tasks.values()
-                if (t["project"] == k and (not t["is_milestone"]))
+                if t["project"] == k
             }
             for k in self.projects
         }
@@ -864,25 +962,28 @@ class GanttDrawer:
         self.resources = {}
 
         for resource in self.data["resources"]:
-            res = Resource(resource)
-            res.price = self.data["resources"][resource].get(
-                "price", {"value": 0, "unit": "unit"}
-            )
-
-            if res.price["unit"] == "batch":
-                if "batch_size" not in res.price:
-                    raise ValueError(
-                        f"Error in Resource {res.name}: batch resource definition missing key 'batch_size'"
-                    )
-            if (
-                vacations := self.data["resources"][resource].get("vacations")
-            ) is not None:
-                res.add_vacations(*vacations)
-
-            if res.price["unit"] in ["unit", "batch"] and res.vacations:
-                raise ValueError(
-                    f"Resource:{res.name} cannot have unit/batch unit type and holidays at the same time"
+            try:
+                res = Resource(resource)
+                res.price = self.data["resources"][resource].get(
+                    "price", {"value": 0, "unit": "unit"}
                 )
+
+                if res.price["unit"] == "batch":
+                    if "batch_size" not in res.price:
+                        raise ValueError(
+                            f"Error in Resource {res.name}: batch resource definition missing key 'batch_size'"
+                        )
+                if (
+                    vacations := self.data["resources"][resource].get("vacations")
+                ) is not None:
+                    res.add_vacations(*vacations)
+
+                if res.price["unit"] in ["unit", "batch"] and res.vacations:
+                    raise ValueError(
+                        f"Resource:{res.name} cannot have unit/batch unit type and holidays at the same time"
+                    )
+            except Exception as err:
+                raise ValueError(f"Definition error in {resource}") from err
 
             self.resources[resource] = res
 

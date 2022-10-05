@@ -19,7 +19,7 @@ from md_planning.md_planning import (
     rename,
     get_task_type,
     is_nested,
-    walk_project,
+    walk_project_tasks,
 )
 
 from gantt import Resource, Task
@@ -130,6 +130,53 @@ Projects:
     return project_str
 
 
+@pytest.fixture
+def nested_error_project():
+    project_str = """
+# Font:
+#     fill: black
+#     font_family: Verdana
+Vacations:
+    - 2022-09-30
+    - 2022-11-01
+    - 2022-11-11
+Resources:
+    Martin:
+        price:
+            value: 68.75
+            unit: workhour
+        vacations:
+            - 2022-09-15
+    Samuel:
+        price:
+            value: 600
+            unit:  workday
+Projects:
+    -   Name: Test1
+        Tasks:
+            kickoff:
+                brief:
+                    type: task
+                    start: 2022-09-05
+                    duration: null
+                    percent_done: 0
+                    resources: null
+                    depends_on: null
+                    best: null
+                    optimal: 5
+                    worst: 10
+            goals:
+                type: task
+                start: 2022-09-05
+                duration: 0.25
+                percent_done: 0
+                resources: Martin
+                depends_on: brief
+            Env setup: [2022-09-06, 1, 0, "Martin", "goals"]
+"""
+    return project_str
+
+
 ################################################################################
 # UTILITY FUNCTIONS
 ################################################################################
@@ -210,7 +257,7 @@ def test_is_nested_nested_is_true(nested_project):
 
 def test_walk_project_returns_all_tasks(nested_project):
     proj = yaml.full_load(nested_project)
-    walked = walk_project(proj["Projects"][0]["Tasks"])
+    walked = walk_project_tasks(proj["Projects"][0]["Tasks"])
     assert isinstance(walked, list)
     assert (
         all([key in ["kickoff", "brief", "goals", "Env setup"] for (key, _) in walked])
@@ -231,6 +278,14 @@ def test_project_reader_build_flat_project_is_conformant(flat_project):
     assert len(projects["projects"]) == 1
     assert pertcharts == {
         "Test1": {
+            "Env setup": {
+                "Tid": "Env setup",
+                "start": 0,
+                "duration": 1,
+                "end": 0,
+                "responsible": "CRITICAL",
+                "pred": ["goals"],
+            },
             "brief": {
                 "Tid": "brief",
                 "start": 0,
@@ -247,13 +302,14 @@ def test_project_reader_build_flat_project_is_conformant(flat_project):
                 "responsible": "CRITICAL",
                 "pred": ["brief"],
             },
-            "Env setup": {
-                "Tid": "Env setup",
+            "kickoff": {
+                "Tid": "kickoff",
                 "start": 0,
-                "duration": 1,
+                "duration": 0,
                 "end": 0,
-                "responsible": "CRITICAL",
-                "pred": ["goals"],
+                "pred": ["brief"],
+                "responsible": "",
+
             },
         }
     }
@@ -280,8 +336,8 @@ def test_project_reader_build_flat_project_is_conformant(flat_project):
                     "name": "kickoff",
                     "start": None,
                     "stop": None,
-                    "duration": None,
-                    "depends_of": None,
+                    "duration": 0,
+                    "depends_of": ["brief"],
                     "resources": None,
                     "percent_done": 0,
                     "color": None,
@@ -297,12 +353,19 @@ def test_project_reader_build_flat_project_is_conformant(flat_project):
                     "fullname": None,
                     "display": True,
                 },
-                "pertchart": {},
+                "pertchart": {
+                    "Tid": "kickoff",
+                    "start": 0,
+                    "duration": 0,
+                    "end": 0,
+                    "pred": ["brief"],
+                    "responsible": "",
+                },
                 "cpm": {
                     "name": "kickoff",
-                    "duration": None,
+                    "duration": 0,
                     "lag": 0,
-                    "depends_of": None,
+                    "depends_of": ["brief"],
                 },
                 "is_milestone": True,
             },
@@ -430,6 +493,14 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
     assert len(projects["projects"]) == 1
     assert pertcharts == {
         "Test1": {
+            "Env setup": {
+                "Tid": "Env setup",
+                "start": 0,
+                "duration": 1,
+                "end": 0,
+                "responsible": "CRITICAL",
+                "pred": ["goals"],
+            },
             "brief": {
                 "Tid": "brief",
                 "start": 0,
@@ -446,13 +517,13 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                 "responsible": "CRITICAL",
                 "pred": ["brief"],
             },
-            "Env setup": {
-                "Tid": "Env setup",
+            "kickoff": {
+                "Tid": "kickoff",
                 "start": 0,
-                "duration": 1,
+                "duration": 0,
                 "end": 0,
-                "responsible": "CRITICAL",
-                "pred": ["goals"],
+                "pred": ["brief"],
+                "responsible": "",
             },
         }
     }
@@ -479,8 +550,8 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "name": "kickoff",
                     "start": None,
                     "stop": None,
-                    "duration": None,
-                    "depends_of": None,
+                    "duration": 0,
+                    "depends_of": ["brief"],
                     "resources": None,
                     "percent_done": 0,
                     "color": None,
@@ -496,12 +567,19 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
                     "fullname": None,
                     "display": True,
                 },
-                "pertchart": {},
+                "pertchart": {
+                    "Tid": "kickoff",
+                    "start": 0,
+                    "duration": 0,
+                    "end": 0,
+                    "pred": ["brief"],
+                    "responsible": "",
+                },
                 "cpm": {
                     "name": "kickoff",
-                    "duration": None,
+                    "duration": 0,
                     "lag": 0,
-                    "depends_of": None,
+                    "depends_of": ["brief"],
                 },
                 "is_milestone": True,
             },
@@ -619,6 +697,12 @@ def test_project_reader_build_nested_project_is_conformant(nested_project):
             },
         },
     }
+
+
+def test_project_reader_nested_raises_exceptions_with_task_name(nested_error_project):
+    with pytest.raises(ValueError) as err:
+        p = ProjectReader(nested_error_project)
+    assert "brief" in str(err.from_exc_info(err._excinfo))
 
 
 ################################################################################
@@ -1100,7 +1184,7 @@ def test_ganttdrawer_budget_flat_def(flat_project):
 
 
 def test_patch_bug_C50565():
-    """BUGFIX: C50565 a project without any task dependency does not produce project outputs"""
+    """:BUGFIX: C50565 a project without any task dependency does not produce project outputs"""
     project_str = """
 Vacations:
     - 2022-09-30
@@ -1148,7 +1232,7 @@ Projects:
 
 
 def test_patch_bug_E17FB6():
-    """BUGFIX: E17FB6 wrong csv task definition prevents project creation"""
+    """:BUGFIX: E17FB6 wrong csv task definition prevents project creation"""
     project_str = """
 Vacations: #general
     - 2022-09-30
@@ -1195,7 +1279,7 @@ Projects:
 
 def test_patch_bug_A14E36():
     """
-    \BUGFIX: A14E36 pertdrawer returns error when renaming the pert drawings
+    :BUGFIX: A14E36 pertdrawer returns error when renaming the pert drawings
 
     sys.stdout shows message: "The file /Users/martinteller/Documents/l1nxit/Documentation/PERT.gv.pdf does not exist."
 
@@ -1249,7 +1333,7 @@ Projects:
 
 def test_patch_bug_0C501D():
     """
-    \BUGFIX: 0C501D pertdrawer returns pert graphviz drawing string to stdout and gets reflected in the hidden output of the project definition
+    :BUGFIX: 0C501D pertdrawer returns pert graphviz drawing string to stdout and gets reflected in the hidden output of the project definition
 
     - try suppressing the output in a contextlib function
 
@@ -1259,6 +1343,179 @@ def test_patch_bug_0C501D():
     """
     pass
 
+
+def test_patch_bug_39651C():
+    """
+    :BUGFIX: 39651C when a simple list definition is put in a project definition, the task is not always recognised.
+    """
+    project_str = """
+# Font:
+#     fill: black
+#     font_family: Verdana
+Vacations:
+    - 2022-09-30
+    - 2022-11-01
+    - 2022-11-11
+Resources:
+    Martin:
+        price:
+            value: 68.75
+            unit: workhour
+        vacations:
+            - 2022-09-15
+    Samuel:
+        price:
+            value: 600
+            unit:  workday
+Projects:
+    -   Name: Test1
+        Tasks:
+            kickoff:
+                brief: [2022-09-05, 0.125, 0, null, null] # is strictly equivalent to common nested format
+            goals:
+                start: 2022-09-05
+                duration: 0.25
+                percent_done: 0
+                resources: Martin
+                depends_on: brief
+            Env setup: [2022-09-06, 1, 0, "Martin", "goals"]
+"""
+    proj = yaml.full_load(project_str)
+    assert is_nested(proj["Projects"][0]["Tasks"])
+
+
+def test_patch_bug_406D86():
+    """
+    :BUGFIX: 406D86 nested simple list task definition raises error
+
+    unsupported operand type(s) for *: 'int' and 'NoneType'
+
+    """
+    project_str = """
+# Font:
+#     fill: black
+#     font_family: Verdana
+Vacations:
+    - 2022-09-30
+    - 2022-11-01
+    - 2022-11-11
+Resources:
+    Martin:
+        price:
+            value: 68.75
+            unit: workhour
+        vacations:
+            - 2022-09-15
+    Samuel:
+        price:
+            value: 600
+            unit:  workday
+Projects:
+    -   Name: Test1
+        Tasks:
+            kickoff:
+                brief: [2022-09-05, 0.125, 0, null, null] # is strictly equivalent to common nested format
+            goals:
+                start: 2022-09-05
+                duration: 0.25
+                percent_done: 0
+                resources: Martin
+                depends_on: brief
+            Env setup: [2022-09-06, 1, 0, "Martin", "goals"]
+"""
+    project_def = ProjectReader(project_str)
+    assert project_def
+
+
+def test_path_bug_26BEBE():
+    """
+    :BUGFIX: 26BEBE nested uncertain task list definition raises
+
+    TypeError: type NoneType doesn't define __round__ method
+
+    issue in walk_project_tasks function => make sure the number of arguments in the list are 9. The item at index 6 is the color argument that must be a color html hex value or null.
+
+    """
+    project_str = """
+# Font:
+#     fill: black
+#     font_family: Verdana
+Vacations:
+    - 2022-09-30
+    - 2022-11-01
+    - 2022-11-11
+Resources:
+    Martin:
+        price:
+            value: 68.75
+            unit: workhour
+        vacations:
+            - 2022-09-15
+    Samuel:
+        price:
+            value: 600
+            unit:  workday
+Projects:
+    -   Name: Test1
+        Tasks:
+            kickoff:
+                brief: [2022-09-05, null, 0, null, null, null, 1, 2, 3] # is strictly equivalent to common nested format
+            goals:
+                start: 2022-09-05
+                duration: 0.25
+                percent_done: 0
+                resources: Martin
+                depends_on: brief
+            Env setup: [2022-09-06, null, 0, "Martin", "goals", null,  1, 2, 3]
+"""
+    project = yaml.full_load(project_str)
+    assert walk_project_tasks(project["Projects"][0]["Tasks"])
+
+
+def test_path_bug_778FE8():
+    """
+    :BUGFIX: 778FE8 nested tasks dependant on milestone don't resolve dependencies
+
+    issue in walk_project_tasks function
+
+    """
+    project_str = """
+# Font:
+#     fill: black
+#     font_family: Verdana
+Vacations:
+    - 2022-09-30
+    - 2022-11-01
+    - 2022-11-11
+Resources:
+    Martin:
+        price:
+            value: 68.75
+            unit: workhour
+        vacations:
+            - 2022-09-15
+    Samuel:
+        price:
+            value: 600
+            unit:  workday
+Projects:
+    -   Name: Test1
+        Tasks:
+            documentation:
+                    document items:
+                        # [start, duration, percent_done , resources, depends_on]
+                        item1 : [2022-10-03, 0.125, 0, "Martin", null]
+                        # item2: [2022-09-06, 1, 0, "Martin", "item1"]
+                        item2: [null, 1, 0, "Martin", "item1"]
+                        item3 : [null, 1, 0, "Martin", "item2"]
+                    debug model: [null, null, 0, "Martin", "document items", null, 2, 5, 10]
+                    output model: [null, null, 0, "Martin", "debug model", null, 0.125, 0.125, 3]
+"""
+    project = yaml.full_load(project_str)
+    res = walk_project_tasks(project["Projects"][0]["Tasks"])
+    assert res[5][0] == "debug model"
+    assert res[5][1]["depends_on"] == "document items"
+    assert res
 
 ################################################################################
 # CLI
